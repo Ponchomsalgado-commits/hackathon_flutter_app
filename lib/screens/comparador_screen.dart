@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
+import '../models/product_model.dart';
+import '../repositories/solar_repository.dart';
+import '../logic/solar_calculator.dart';
+import 'package:flutter_application_1/screens/cotizar_bottom_sheet.dart';
 
 class ComparadorScreen extends StatefulWidget {
   final int panelesSugeridos;
   final double consumoAnual;
   final String localidad;
+  final double irradiacion;
+  final int horarioIndex;
 
   const ComparadorScreen({
     super.key,
     this.panelesSugeridos = 6,
     this.consumoAnual = 3600,
     this.localidad = 'Ciudad de México',
+    this.irradiacion = 5.8,
+    this.horarioIndex = 2,
   });
 
   @override
@@ -20,141 +28,64 @@ class ComparadorScreen extends StatefulWidget {
 
 class _ComparadorScreenState extends State<ComparadorScreen>
     with TickerProviderStateMixin {
-  int _selectedFilter = 0; // 0=Todos, 1=Paneles, 2=Baterías, 3=Paquetes
-  int? _selectedProduct;
+
+  final SolarRepository _repository = SolarRepository();
+  late SolarCalculator _calculator;
+
+  int _selectedFilter = 0;
+  int? _selectedProductIndex;
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<Product> _productos = [];
+  List<Product> _filteredProducts = [];
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnim;
 
   final List<String> _filters = ['Todos', 'Paneles', 'Baterías', 'Paquetes'];
 
-  final List<Map<String, dynamic>> _productos = [
-    {
-      'tipo': 'Paquete',
-      'nombre': 'Solar Starter',
-      'descripcion': 'Ideal para hogares pequeños',
-      'paneles': 4,
-      'bateria': '5 kWh',
-      'precio': 85000,
-      'ahorro_anual': 12000,
-      'garantia': '10 años',
-      'tag': 'Más popular',
-      'tagColor': AppColors.solarOrange,
-      'icon': Icons.home_rounded,
-      'potencia': '1.6 kW',
-    },
-    {
-      'tipo': 'Paquete',
-      'nombre': 'Solar Plus',
-      'descripcion': 'Para consumo medio-alto',
-      'paneles': 8,
-      'bateria': '10 kWh',
-      'precio': 155000,
-      'ahorro_anual': 22000,
-      'garantia': '15 años',
-      'tag': 'Recomendado',
-      'tagColor': const Color(0xFF4FC3F7),
-      'icon': Icons.house_rounded,
-      'potencia': '3.2 kW',
-    },
-    {
-      'tipo': 'Paquete',
-      'nombre': 'Solar Pro',
-      'descripcion': 'Máxima independencia energética',
-      'paneles': 12,
-      'bateria': '20 kWh',
-      'precio': 240000,
-      'ahorro_anual': 35000,
-      'garantia': '25 años',
-      'tag': 'Premium',
-      'tagColor': const Color(0xFFFFD700),
-      'icon': Icons.apartment_rounded,
-      'potencia': '4.8 kW',
-    },
-    {
-      'tipo': 'Panel',
-      'nombre': 'Panel Monocristalino 400W',
-      'descripcion': 'Alta eficiencia 21.5%',
-      'paneles': 1,
-      'bateria': null,
-      'precio': 8500,
-      'ahorro_anual': 2800,
-      'garantia': '25 años',
-      'tag': null,
-      'tagColor': null,
-      'icon': Icons.solar_power_rounded,
-      'potencia': '400 W',
-    },
-    {
-      'tipo': 'Panel',
-      'nombre': 'Panel Bifacial 450W',
-      'descripcion': 'Captación frontal y trasera',
-      'paneles': 1,
-      'bateria': null,
-      'precio': 11200,
-      'ahorro_anual': 3400,
-      'garantia': '30 años',
-      'tag': 'Alta eficiencia',
-      'tagColor': const Color(0xFF81C784),
-      'icon': Icons.solar_power_rounded,
-      'potencia': '450 W',
-    },
-    {
-      'tipo': 'Batería',
-      'nombre': 'Batería LiFePO4 5kWh',
-      'descripcion': 'Ciclo de vida > 6000 cargas',
-      'paneles': null,
-      'bateria': '5 kWh',
-      'precio': 32000,
-      'ahorro_anual': 4500,
-      'garantia': '10 años',
-      'tag': null,
-      'tagColor': null,
-      'icon': Icons.battery_charging_full_rounded,
-      'potencia': null,
-    },
-    {
-      'tipo': 'Batería',
-      'nombre': 'Batería LiFePO4 10kWh',
-      'descripcion': 'Autonomía nocturna completa',
-      'paneles': null,
-      'bateria': '10 kWh',
-      'precio': 58000,
-      'ahorro_anual': 8500,
-      'garantia': '12 años',
-      'tag': 'Más autonomía',
-      'tagColor': const Color(0xFF4FC3F7),
-      'icon': Icons.battery_charging_full_rounded,
-      'potencia': null,
-    },
-  ];
-
-  List<Map<String, dynamic>> get _filteredProducts {
-    if (_selectedFilter == 0) return _productos;
-    final tipo = _filters[_selectedFilter];
-    // Remove 's' to match tipo field: Paneles->Panel, Baterías->Batería, Paquetes->Paquete
-    final tipoSingular = tipo == 'Paneles'
-        ? 'Panel'
-        : tipo == 'Baterías'
-            ? 'Batería'
-            : 'Paquete';
-    return _productos.where((p) => p['tipo'] == tipoSingular).toList();
-  }
-
   @override
   void initState() {
     super.initState();
-    _fadeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    )..forward();
+    _calculator = SolarCalculator(
+      consumoAnualKWh: widget.consumoAnual,
+      irradiacionKWhM2Dia: widget.irradiacion,
+      tiltGrados: SolarCalculator.calcularTilt(widget.horarioIndex, widget.irradiacion),
+      azimutGrados: SolarCalculator.calcularAzimut(widget.horarioIndex),
+      mesesAltoConsumo: const [],
+      horarioConsumoIndex: widget.horarioIndex,
+    );
+    _fadeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _fadeAnim = CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
+    _cargarProductos();
   }
 
   @override
-  void dispose() {
-    _fadeController.dispose();
-    super.dispose();
+  void dispose() { _fadeController.dispose(); super.dispose(); }
+
+  Future<void> _cargarProductos() async {
+    setState(() { _isLoading = true; _errorMessage = null; });
+    try {
+      final all = await _repository.getAllProducts();
+      final recomendados = _calculator.recomendar(all);
+      setState(() { _productos = recomendados; _isLoading = false; });
+      _applyFilter();
+      _fadeController.forward();
+    } catch (e) {
+      setState(() { _errorMessage = 'Error al cargar productos.'; _isLoading = false; });
+    }
+  }
+
+  void _applyFilter() {
+    setState(() {
+      if (_selectedFilter == 0) {
+        _filteredProducts = _productos;
+      } else {
+        final cats = [null, ProductCategory.panel, ProductCategory.bateria, ProductCategory.paquete];
+        _filteredProducts = _productos.where((p) => p.categoria == cats[_selectedFilter]).toList();
+      }
+      _selectedProductIndex = null;
+    });
   }
 
   @override
@@ -163,391 +94,205 @@ class _ComparadorScreenState extends State<ComparadorScreen>
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
-          _buildBackground(),
+          Positioned.fill(child: Container(decoration: const BoxDecoration(
+            gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+              colors: [Color(0xFF0A0E1A), Color(0xFF0C1220), Color(0xFF0A0E1A)])))),
           SafeArea(
-            child: FadeTransition(
-              opacity: _fadeAnim,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildTopBar(),
-                  _buildHeader(),
-                  const SizedBox(height: 16),
-                  _buildFilters(),
-                  const SizedBox(height: 16),
-                  Expanded(child: _buildProductList()),
-                ],
-              ),
-            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _buildTopBar(),
+              _buildHeader(),
+              const SizedBox(height: 16),
+              _buildFilters(),
+              const SizedBox(height: 16),
+              Expanded(child: _buildBody()),
+            ]),
           ),
-          // Bottom sheet de producto seleccionado
-          if (_selectedProduct != null) _buildSelectionBar(),
+          if (_selectedProductIndex != null) _buildSelectionBar(),
         ],
       ),
     );
   }
 
-  Widget _buildTopBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.of(context).pop(),
-            child: Container(
-              width: 42, height: 42,
-              decoration: BoxDecoration(
-                color: AppColors.backgroundCard,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: AppColors.textSecondary, size: 16),
-            ),
-          ),
-          const SizedBox(width: 16),
-          const Text('Comparador de productos',
-              style: TextStyle(
-                fontSize: 17, fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              )),
-        ],
-      ),
-    );
+  Widget _buildBody() {
+    if (_isLoading) return Center(child: CircularProgressIndicator(
+      valueColor: const AlwaysStoppedAnimation<Color>(AppColors.solarOrange)));
+    if (_errorMessage != null) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Icon(Icons.error_outline_rounded, color: AppColors.textHint, size: 48),
+      const SizedBox(height: 12),
+      Text(_errorMessage!, style: const TextStyle(color: AppColors.textSecondary)),
+      const SizedBox(height: 16),
+      GestureDetector(onTap: _cargarProductos, child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        decoration: BoxDecoration(color: AppColors.solarOrange, borderRadius: BorderRadius.circular(12)),
+        child: const Text('Reintentar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)))),
+    ]));
+    return FadeTransition(opacity: _fadeAnim, child: _buildProductList());
   }
 
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.backgroundCard,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.info_outline_rounded,
-                color: AppColors.solarOrange, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Basado en tu consumo de ${widget.consumoAnual.toStringAsFixed(0)} kWh/año, '
-                'te recomendamos ${widget.panelesSugeridos} paneles en ${widget.localidad}.',
-                style: const TextStyle(
-                    fontSize: 13, color: AppColors.textSecondary, height: 1.5),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _buildTopBar() => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    child: Row(children: [
+      GestureDetector(onTap: () => Navigator.of(context).pop(),
+        child: Container(width: 42, height: 42,
+          decoration: BoxDecoration(color: AppColors.backgroundCard,
+            borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+          child: const Icon(Icons.arrow_back_ios_new_rounded, color: AppColors.textSecondary, size: 16))),
+      const SizedBox(width: 16),
+      const Text('Comparador de productos',
+        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+      const Spacer(),
+      GestureDetector(onTap: _cargarProductos,
+        child: Container(width: 42, height: 42,
+          decoration: BoxDecoration(color: AppColors.backgroundCard,
+            borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+          child: const Icon(Icons.refresh_rounded, color: AppColors.textSecondary, size: 18))),
+    ]),
+  );
 
-  Widget _buildFilters() {
-    return SizedBox(
-      height: 40,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: _filters.length,
-        itemBuilder: (context, i) {
-          final selected = _selectedFilter == i;
-          return Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: GestureDetector(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                setState(() => _selectedFilter = i);
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? AppColors.solarOrange
-                      : AppColors.backgroundCard,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: selected ? AppColors.solarOrange : AppColors.border,
-                  ),
-                ),
-                child: Text(
-                  _filters[i],
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: selected ? Colors.white : AppColors.textSecondary,
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
+  Widget _buildHeader() => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 24),
+    child: Container(padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppColors.backgroundCard,
+        borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+      child: Row(children: [
+        const Icon(Icons.info_outline_rounded, color: AppColors.solarOrange, size: 20),
+        const SizedBox(width: 12),
+        Expanded(child: Text(
+          'Consumo: ${widget.consumoAnual.toStringAsFixed(0)} kWh/año · ${widget.panelesSugeridos} paneles sugeridos · ${widget.localidad}',
+          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.5))),
+      ])),
+  );
+
+  Widget _buildFilters() => SizedBox(height: 40, child: ListView.builder(
+    scrollDirection: Axis.horizontal,
+    padding: const EdgeInsets.symmetric(horizontal: 20),
+    itemCount: _filters.length,
+    itemBuilder: (context, i) {
+      final sel = _selectedFilter == i;
+      return Padding(padding: const EdgeInsets.only(right: 10),
+        child: GestureDetector(onTap: () { HapticFeedback.selectionClick(); setState(() => _selectedFilter = i); _applyFilter(); },
+          child: AnimatedContainer(duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            decoration: BoxDecoration(
+              color: sel ? AppColors.solarOrange : AppColors.backgroundCard,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: sel ? AppColors.solarOrange : AppColors.border)),
+            child: Text(_filters[i], style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
+              color: sel ? Colors.white : AppColors.textSecondary)))));
+    }));
 
   Widget _buildProductList() {
-    final products = _filteredProducts;
+    if (_filteredProducts.isEmpty) return const Center(
+      child: Text('No hay productos en esta categoría.', style: TextStyle(color: AppColors.textSecondary)));
     return ListView.builder(
-      padding: EdgeInsets.fromLTRB(
-          20, 0, 20, _selectedProduct != null ? 100 : 20),
-      itemCount: products.length,
-      itemBuilder: (context, i) => _buildProductCard(products[i], i),
-    );
+      padding: EdgeInsets.fromLTRB(20, 0, 20, _selectedProductIndex != null ? 110 : 20),
+      itemCount: _filteredProducts.length,
+      itemBuilder: (ctx, i) => _buildProductCard(_filteredProducts[i], i));
   }
 
-  Widget _buildProductCard(Map<String, dynamic> p, int index) {
-    final globalIndex = _productos.indexOf(p);
-    final isSelected = _selectedProduct == globalIndex;
-
+  Widget _buildProductCard(Product p, int index) {
+    final isSelected = _selectedProductIndex == index;
+    final roi = _calculator.retornoInversion(p.precio);
+    final roiLabel = roi.isInfinite ? 'N/A' : '${roi.toStringAsFixed(1)} años';
     return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        setState(() {
-          _selectedProduct = isSelected ? null : globalIndex;
-        });
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(18),
+      onTap: () { HapticFeedback.selectionClick(); setState(() => _selectedProductIndex = isSelected ? null : index); },
+      child: AnimatedContainer(duration: const Duration(milliseconds: 250),
+        margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.solarOrange.withOpacity(0.08)
-              : AppColors.backgroundCard,
+          color: isSelected ? AppColors.solarOrange.withOpacity(0.08) : AppColors.backgroundCard,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? AppColors.solarOrange : AppColors.border,
-            width: isSelected ? 2 : 1,
-          ),
-          boxShadow: isSelected
-              ? [BoxShadow(
-                  color: AppColors.solarOrange.withOpacity(0.15),
-                  blurRadius: 16, offset: const Offset(0, 4),
-                )]
-              : [],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 44, height: 44,
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppColors.solarOrange.withOpacity(0.2)
-                        : AppColors.backgroundInput,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(p['icon'] as IconData,
-                      color: isSelected
-                          ? AppColors.solarOrange
-                          : AppColors.textSecondary,
-                      size: 22),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(p['nombre'] as String,
-                              style: TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w600,
-                                color: isSelected
-                                    ? AppColors.solarOrange
-                                    : AppColors.textPrimary,
-                              )),
-                          if (p['tag'] != null) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: (p['tagColor'] as Color).withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(p['tag'] as String,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: p['tagColor'] as Color,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                            ),
-                          ],
-                        ],
-                      ),
-                      Text(p['descripcion'] as String,
-                          style: const TextStyle(
-                              fontSize: 12, color: AppColors.textHint)),
-                    ],
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '\$${_formatPrice(p['precio'] as int)}',
-                      style: TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w700,
-                        color: isSelected
-                            ? AppColors.solarOrange
-                            : AppColors.textPrimary,
-                      ),
-                    ),
-                    const Text('MXN',
-                        style: TextStyle(
-                            fontSize: 11, color: AppColors.textHint)),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            const Divider(color: AppColors.border, height: 1),
-            const SizedBox(height: 14),
-            // Specs row
-            Row(
-              children: [
-                if (p['paneles'] != null)
-                  _buildSpec(Icons.solar_power_rounded,
-                      '${p['paneles']} panel${p['paneles'] == 1 ? '' : 'es'}'),
-                if (p['potencia'] != null)
-                  _buildSpec(Icons.flash_on_rounded, p['potencia'] as String),
-                if (p['bateria'] != null)
-                  _buildSpec(Icons.battery_charging_full_rounded,
-                      p['bateria'] as String),
-                _buildSpec(Icons.savings_rounded,
-                    '\$${_formatPrice(p['ahorro_anual'] as int)}/año'),
-                _buildSpec(Icons.verified_rounded, p['garantia'] as String),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
+          border: Border.all(color: isSelected ? AppColors.solarOrange : AppColors.border, width: isSelected ? 2 : 1),
+          boxShadow: isSelected ? [BoxShadow(color: AppColors.solarOrange.withOpacity(0.15), blurRadius: 16, offset: const Offset(0, 4))] : []),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(width: 44, height: 44,
+              decoration: BoxDecoration(
+                color: isSelected ? AppColors.solarOrange.withOpacity(0.2) : AppColors.backgroundInput,
+                borderRadius: BorderRadius.circular(12)),
+              child: Icon(_categoryIcon(p.categoria),
+                color: isSelected ? AppColors.solarOrange : AppColors.textSecondary, size: 22)),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Flexible(child: Text(p.nombre, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600,
+                  color: isSelected ? AppColors.solarOrange : AppColors.textPrimary))),
+                if (p.esRecomendado) ...[const SizedBox(width: 6), Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(color: AppColors.solarOrange.withOpacity(0.2), borderRadius: BorderRadius.circular(6)),
+                  child: const Text('★ Top', style: TextStyle(fontSize: 10, color: AppColors.solarOrange, fontWeight: FontWeight.w700)))],
+                if (p.etiqueta != null && !p.esRecomendado) ...[const SizedBox(width: 6), Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(6)),
+                  child: Text(p.etiqueta!, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)))],
+              ]),
+              Text(p.descripcion, style: const TextStyle(fontSize: 12, color: AppColors.textHint)),
+            ])),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text('\$${_formatPrice(p.precio.toInt())}', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700,
+                color: isSelected ? AppColors.solarOrange : AppColors.textPrimary)),
+              const Text('MXN', style: TextStyle(fontSize: 10, color: AppColors.textHint)),
+            ]),
+          ]),
+          const SizedBox(height: 14),
+          const Divider(color: AppColors.border, height: 1),
+          const SizedBox(height: 12),
+          Row(children: [
+            if (p.cantidadPaneles != null) _buildSpec(Icons.solar_power_rounded, '${p.cantidadPaneles} paneles'),
+            if (p.potenciaKW != null) _buildSpec(Icons.flash_on_rounded, '${p.potenciaKW!.toStringAsFixed(1)} kW'),
+            if (p.capacidadKWh != null) _buildSpec(Icons.battery_charging_full_rounded, '${p.capacidadKWh!.toStringAsFixed(0)} kWh'),
+            _buildSpec(Icons.savings_rounded, '\$${_formatPrice(p.ahorroAnualEstimado.toInt())}/año'),
+            _buildSpec(Icons.replay_rounded, 'ROI $roiLabel'),
+          ]),
+        ])));
   }
 
-  Widget _buildSpec(IconData icon, String label) {
-    return Expanded(
-      child: Row(
-        children: [
-          Icon(icon, size: 13, color: AppColors.textHint),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(label,
-                style: const TextStyle(
-                    fontSize: 11, color: AppColors.textSecondary),
-                overflow: TextOverflow.ellipsis),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildSpec(IconData icon, String label) => Expanded(child: Row(children: [
+    Icon(icon, size: 12, color: AppColors.textHint), const SizedBox(width: 4),
+    Flexible(child: Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary), overflow: TextOverflow.ellipsis)),
+  ]));
 
   Widget _buildSelectionBar() {
-    final p = _productos[_selectedProduct!];
-    return Positioned(
-      bottom: 0, left: 0, right: 0,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-        decoration: BoxDecoration(
-          color: AppColors.backgroundCard,
-          border: Border(top: BorderSide(color: AppColors.border)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.4),
-              blurRadius: 20, offset: const Offset(0, -4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(p['nombre'] as String,
-                      style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      )),
-                  Text('\$${_formatPrice(p['precio'] as int)} MXN',
-                      style: const TextStyle(
-                          fontSize: 13, color: AppColors.solarOrange)),
-                ],
-              ),
-            ),
-            GestureDetector(
-              onTap: () {
-                HapticFeedback.mediumImpact();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('${p['nombre']} agregado a tu cotización'),
-                    backgroundColor: AppColors.solarOrange,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                );
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [AppColors.solarOrange, AppColors.solarGlow],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.solarOrange.withOpacity(0.35),
-                      blurRadius: 12, offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: const Text('Cotizar',
-                    style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    )),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    final p = _filteredProducts[_selectedProductIndex!];
+    final roi = _calculator.retornoInversion(p.precio);
+    final roiStr = roi.isInfinite ? 'N/A' : '${roi.toStringAsFixed(1)} años';
+    return Positioned(bottom: 0, left: 0, right: 0,
+      child: Container(padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        decoration: BoxDecoration(color: AppColors.backgroundCard,
+          border: const Border(top: BorderSide(color: AppColors.border)),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, -4))]),
+        child: Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(p.nombre, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Text('\$${_formatPrice(p.precio.toInt())} MXN · ROI $roiStr',
+              style: const TextStyle(fontSize: 12, color: AppColors.solarOrange)),
+          ])),
+          GestureDetector(
+            
+            child: Container(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [AppColors.solarOrange, AppColors.solarGlow],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight),
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [BoxShadow(color: AppColors.solarOrange.withOpacity(0.35), blurRadius: 12, offset: const Offset(0, 4))]),
+              child: const Text('Cotizar', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)))),
+        ])));
+  }
+
+  IconData _categoryIcon(ProductCategory cat) {
+    switch (cat) {
+      case ProductCategory.panel: return Icons.solar_power_rounded;
+      case ProductCategory.bateria: return Icons.battery_charging_full_rounded;
+      case ProductCategory.paquete: return Icons.home_rounded;
+    }
   }
 
   String _formatPrice(int price) {
-    if (price >= 1000) {
-      final parts = price.toString().split('');
-      final result = StringBuffer();
-      for (int i = 0; i < parts.length; i++) {
-        if (i > 0 && (parts.length - i) % 3 == 0) result.write(',');
-        result.write(parts[i]);
-      }
-      return result.toString();
+    final s = price.toString();
+    final result = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) result.write(',');
+      result.write(s[i]);
     }
-    return price.toString();
-  }
-
-  Widget _buildBackground() {
-    return Positioned.fill(
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0A0E1A), Color(0xFF0C1220), Color(0xFF0A0E1A)],
-          ),
-        ),
-      ),
-    );
+    return result.toString();
   }
 }

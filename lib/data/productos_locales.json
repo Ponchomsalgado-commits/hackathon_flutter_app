@@ -1,0 +1,71 @@
+{
+  "proveedor": "Tecnoligente",
+  "proveedorId": "tecnoligente",
+  "productos": [
+    {
+      "id": "tec_001",
+      "categoria": "panel",
+      "nombre": "Panel Monocristalino 500W Tier 1",
+      "descripcion": "Alta eficiencia, marco negro, garantía extendida",
+      "precio": 7800,
+      "potenciaKW": 0.4,
+      "capacidadKWh": null,
+      "cantidadPaneles": 1,
+      "ahorroAnualEstimado": 2600,
+      "garantiaAnios": 25,
+      "etiqueta": null
+    },
+    {
+      "id": "tec_002",
+      "categoria": "panel",
+      "nombre": "Panel Policristalino 350W",
+      "descripcion": "Buena relación precio-rendimiento",
+      "precio": 5900,
+      "potenciaKW": 0.35,
+      "capacidadKWh": null,
+      "cantidadPaneles": 1,
+      "ahorroAnualEstimado": 2100,
+      "garantiaAnios": 20,
+      "etiqueta": "Precio accesible"
+    },
+    {
+      "id": "tec_003",
+      "categoria": "bateria",
+      "nombre": "Batería AGM 200Ah 12V",
+      "descripcion": "Ideal para sistemas pequeños sin mantenimiento",
+      "precio": 18500,
+      "potenciaKW": null,
+      "capacidadKWh": 2.4,
+      "cantidadPaneles": null,
+      "ahorroAnualEstimado": 3200,
+      "garantiaAnios": 5,
+      "etiqueta": null
+    },
+    {
+      "id": "tec_004",
+      "categoria": "paquete",
+      "nombre": "Kit Solar Residencial 2kW",
+      "descripcion": "5 paneles + inversor + instalación incluida",
+      "precio": 72000,
+      "potenciaKW": 2.0,
+      "capacidadKWh": null,
+      "cantidadPaneles": 5,
+      "ahorroAnualEstimado": 14000,
+      "garantiaAnios": 10,
+      "etiqueta": "Incluye instalación"
+    },
+    {
+      "id": "tec_005",
+      "categoria": "paquete",
+      "nombre": "Kit Solar + Batería 3kW",
+      "descripcion": "8 paneles + batería 5kWh + inversor híbrido",
+      "precio": 118000,
+      "potenciaKW": 3.2,
+      "capacidadKWh": 5.0,
+      "cantidadPaneles": 8,
+      "ahorroAnualEstimado": 21000,
+      "garantiaAnios": 12,
+      "etiqueta": "Más vendido"
+    }
+  ]
+}
