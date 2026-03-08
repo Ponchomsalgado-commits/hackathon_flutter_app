@@ -267,8 +267,16 @@ class _ComparadorScreenState extends State<ComparadorScreen>
               style: const TextStyle(fontSize: 12, color: AppColors.solarOrange)),
           ])),
           GestureDetector(
-            
-            child: Container(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+  onTap: () {
+    CotizarBottomSheet.show(
+      context,
+      producto: p,
+      consumoAnual: widget.consumoAnual,
+      localidad: widget.localidad,
+      irradiacion: widget.irradiacion,
+    );
+  },
+  child: Container(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(colors: [AppColors.solarOrange, AppColors.solarGlow],
                   begin: Alignment.topLeft, end: Alignment.bottomRight),
