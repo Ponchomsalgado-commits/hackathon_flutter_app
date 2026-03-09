@@ -207,11 +207,12 @@ class SolarCalculator {
     }
   }
 
-  /// Ajusta el tilt según el horario y la ubicación.
-  static double calcularTilt(int horarioIndex, double irradiacion) {
-    final base = irradiacion > 6.5 ? 30.0 : irradiacion > 6.0 ? 25.0 : 20.0;
+  /// Ajusta el tilt según el horario y la latitud de la zona.
+  static double calcularTilt(int horarioIndex, double latitud) {
+    // Tilt base = latitud × 0.87 (fórmula estándar para México)
+    final base = (latitud.abs() * 0.87).clamp(10.0, 35.0);
     switch (horarioIndex) {
-      case 2: return base + 3; // Tarde: más inclinado capta mejor el sol bajo
+      case 2: return base + 3; // Tarde: más inclinado
       case 1: return base - 2; // Mañana: menos inclinado
       default: return base;
     }

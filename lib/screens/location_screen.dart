@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import '../theme/app_theme.dart';
+import '../services/geocoding_service.dart';
+import '../services/nasa_power_service.dart';
+import '../logic/solar_calculator.dart';
 import 'package:flutter_application_1/screens/questions_screen.dart';
 
 class LocationScreen extends StatefulWidget {
@@ -17,6 +21,10 @@ class _LocationScreenState extends State<LocationScreen>
   bool _isInputFocused = false;
   bool _usingLocation = false;
   bool _locationLoading = false;
+  bool _nasaLoading = false;
+  String? _nasaError;
+  double? _gpsLatitud;
+  double? _gpsLongitud;
 
   late AnimationController _fadeController;
   late Animation<double> _headerFade;
@@ -66,35 +74,138 @@ class _LocationScreenState extends State<LocationScreen>
     super.dispose();
   }
 
-  void _simulateLocation() async {
+  Future<void> _useMyLocation() async {
     HapticFeedback.mediumImpact();
-    setState(() {
-      _locationLoading = true;
-      _usingLocation = false;
-      _postalController.clear();
-    });
+    setState(() { _locationLoading = true; _usingLocation = false; });
 
-    await Future.delayed(const Duration(milliseconds: 1500));
+    try {
+      // 1. Verificar si el servicio de ubicación está habilitado
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _showLocationError('Activa el GPS de tu dispositivo e intenta de nuevo.');
+        return;
+      }
 
-    if (mounted) {
-      setState(() {
-        _locationLoading = false;
-        _usingLocation = true;
-        _postalController.text = '06600'; // CDMX simulado
-      });
-      HapticFeedback.lightImpact();
+      // 2. Verificar y solicitar permisos
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          _showLocationError('Permiso de ubicación denegado.');
+          return;
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        _showLocationError('Permiso denegado permanentemente. Actívalo en Configuración.');
+        return;
+      }
+
+      // 3. Obtener posición GPS real
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 10),
+      );
+
+      // 4. Convertir lat/lng a CP aproximado usando tabla inversa
+      final cpAproximado = _latLngToCP(position.latitude, position.longitude);
+
+      if (mounted) {
+        setState(() {
+          _locationLoading = false;
+          _usingLocation = true;
+          _postalController.text = cpAproximado;
+          // Guardar coordenadas reales para usarlas en _onNext
+          _gpsLatitud = position.latitude;
+          _gpsLongitud = position.longitude;
+        });
+        HapticFeedback.lightImpact();
+      }
+    } catch (e) {
+      _showLocationError('No se pudo obtener la ubicación. Ingresa tu CP manualmente.');
     }
+  }
+
+  void _showLocationError(String msg) {
+    if (!mounted) return;
+    setState(() => _locationLoading = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: Colors.redAccent,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
+  }
+
+  /// Convierte lat/lng a código postal aproximado por zona de México
+  String _latLngToCP(double lat, double lng) {
+    // Norte (Baja California, Sonora, Chihuahua)
+    if (lat >= 28) {
+      if (lng <= -114) return '21000'; // Mexicali/Tijuana
+      if (lng <= -109) return '83000'; // Hermosillo
+      return '31000'; // Chihuahua
+    }
+    // Noreste (Coahuila, Nuevo León, Tamaulipas)
+    if (lat >= 24 && lng >= -102) return '64000'; // Monterrey
+    // Occidente (Jalisco, Colima, Nayarit)
+    if (lat >= 19 && lat < 22 && lng <= -102) return '44100'; // Guadalajara
+    // Centro (CDMX, Estado de México, Morelos)
+    if (lat >= 18 && lat < 20 && lng >= -100 && lng <= -98) return '06600'; // CDMX
+    // Sur (Oaxaca, Chiapas, Guerrero)
+    if (lat < 18) return '68000'; // Oaxaca
+    // Sureste (Yucatán, Quintana Roo)
+    if (lng >= -92) return '97000'; // Mérida
+    // Default
+    return '06600';
   }
 
   bool get _canContinue =>
       _postalController.text.trim().length >= 4 || _usingLocation;
 
-  void _onNext() {
-    if (!_canContinue) return;
+  Future<void> _onNext() async {
+    if (!_canContinue || _nasaLoading) return;
     HapticFeedback.mediumImpact();
+
+    final cp = _postalController.text.trim();
+    setState(() { _nasaLoading = true; _nasaError = null; });
+
+    // Si usó GPS, tenemos lat/lng exactos — si no, usar tabla por CP
+    late double latitud;
+    late double longitud;
+    late String localidad;
+
+    if (_usingLocation && _gpsLatitud != null && _gpsLongitud != null) {
+      // Coordenadas GPS reales — máxima precisión para NASA POWER
+      latitud = _gpsLatitud!;
+      longitud = _gpsLongitud!;
+      localidad = 'Tu ubicación';
+    } else {
+      // Tabla interna por CP
+      final geo = await GeocodingService().getLocation(cp);
+      latitud = geo.latitud;
+      longitud = geo.longitud;
+      localidad = geo.localidad;
+    }
+
+    // lat/lng → irradiación (NASA POWER o fallback histórico)
+    final nasa = await NasaPowerService().getIrradiation(
+      latitud: latitud,
+      longitud: longitud,
+      tilt: SolarCalculator.calcularTilt(2, latitud.abs()),
+      azimut: 180,
+    );
+
+    if (!mounted) return;
+    setState(() => _nasaLoading = false);
+
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => QuestionsScreen(),
+        builder: (context) => QuestionsScreen(
+          codigoPostal: cp,
+          localidad: localidad,
+          latitud: latitud,
+          longitud: longitud,
+          irradiacionData: nasa,
+        ),
       ),
     );
   }
@@ -425,7 +536,7 @@ class _LocationScreenState extends State<LocationScreen>
                         FadeTransition(
                           opacity: _cardFade,
                           child: GestureDetector(
-                            onTap: _locationLoading ? null : _simulateLocation,
+                            onTap: _locationLoading ? null : _useMyLocation,
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
                               width: double.infinity,
@@ -498,7 +609,23 @@ class _LocationScreenState extends State<LocationScreen>
                   opacity: _buttonFade,
                   child: Container(
                     padding: const EdgeInsets.fromLTRB(28, 0, 28, 32),
-                    child: _buildNextButton(),
+                    child: Column(
+                      children: [
+                        if (_nasaError != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Row(children: [
+                              const Icon(Icons.error_outline_rounded,
+                                  color: Colors.redAccent, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(child: Text(_nasaError!,
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.redAccent))),
+                            ]),
+                          ),
+                        _buildNextButton(),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -537,7 +664,7 @@ class _LocationScreenState extends State<LocationScreen>
   }
 
   Widget _buildNextButton() {
-    final enabled = _canContinue;
+    final enabled = _canContinue && !_nasaLoading;
     return GestureDetector(
       onTap: enabled ? _onNext : null,
       child: AnimatedContainer(
@@ -554,37 +681,32 @@ class _LocationScreenState extends State<LocationScreen>
               : null,
           color: enabled ? null : AppColors.backgroundCard,
           borderRadius: BorderRadius.circular(16),
-          border: enabled
-              ? null
-              : Border.all(color: AppColors.border, width: 1),
+          border: enabled ? null : Border.all(color: AppColors.border, width: 1),
           boxShadow: enabled
-              ? [
-                  BoxShadow(
-                    color: AppColors.solarOrange.withOpacity(0.35),
-                    blurRadius: 18,
-                    offset: const Offset(0, 6),
-                  ),
-                ]
+              ? [BoxShadow(color: AppColors.solarOrange.withOpacity(0.35),
+                  blurRadius: 18, offset: const Offset(0, 6))]
               : [],
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              'Siguiente',
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: enabled ? Colors.white : AppColors.textHint,
-                letterSpacing: 0.3,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Icon(
-              Icons.arrow_forward_rounded,
-              color: enabled ? Colors.white : AppColors.textHint,
-              size: 20,
-            ),
+            if (_nasaLoading) ...[
+              const SizedBox(width: 20, height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white))),
+              const SizedBox(width: 12),
+              const Text('Calculando irradiación...',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600,
+                      color: Colors.white)),
+            ] else ...[
+              Text('Siguiente',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600,
+                      color: enabled ? Colors.white : AppColors.textHint,
+                      letterSpacing: 0.3)),
+              const SizedBox(width: 8),
+              Icon(Icons.arrow_forward_rounded,
+                  color: enabled ? Colors.white : AppColors.textHint, size: 20),
+            ],
           ],
         ),
       ),

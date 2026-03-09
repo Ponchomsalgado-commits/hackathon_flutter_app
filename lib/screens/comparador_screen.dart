@@ -4,7 +4,6 @@ import '../theme/app_theme.dart';
 import '../models/product_model.dart';
 import '../repositories/solar_repository.dart';
 import '../logic/solar_calculator.dart';
-import 'package:flutter_application_1/screens/cotizar_bottom_sheet.dart';
 
 class ComparadorScreen extends StatefulWidget {
   final int panelesSugeridos;
@@ -12,6 +11,7 @@ class ComparadorScreen extends StatefulWidget {
   final String localidad;
   final double irradiacion;
   final int horarioIndex;
+  final double presupuesto;
 
   const ComparadorScreen({
     super.key,
@@ -20,6 +20,7 @@ class ComparadorScreen extends StatefulWidget {
     this.localidad = 'Ciudad de México',
     this.irradiacion = 5.8,
     this.horarioIndex = 2,
+    this.presupuesto = 100000,
   });
 
   @override
@@ -267,16 +268,13 @@ class _ComparadorScreenState extends State<ComparadorScreen>
               style: const TextStyle(fontSize: 12, color: AppColors.solarOrange)),
           ])),
           GestureDetector(
-  onTap: () {
-    CotizarBottomSheet.show(
-      context,
-      producto: p,
-      consumoAnual: widget.consumoAnual,
-      localidad: widget.localidad,
-      irradiacion: widget.irradiacion,
-    );
-  },
-  child: Container(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            onTap: () { HapticFeedback.mediumImpact();
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('${p.nombre} agregado a tu cotización'),
+                backgroundColor: AppColors.solarOrange, behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))));
+            },
+            child: Container(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(colors: [AppColors.solarOrange, AppColors.solarGlow],
                   begin: Alignment.topLeft, end: Alignment.bottomRight),

@@ -1,10 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
+import '../services/nasa_power_service.dart';
+import '../logic/solar_calculator.dart';
 import 'package:flutter_application_1/screens/results_screen.dart';
 
 class QuestionsScreen extends StatefulWidget {
-  const QuestionsScreen({super.key});
+  final String codigoPostal;
+  final String localidad;
+  final double latitud;
+  final double longitud;
+  final SolarIrradiationData irradiacionData;
+
+  const QuestionsScreen({
+    super.key,
+    required this.codigoPostal,
+    required this.localidad,
+    required this.latitud,
+    required this.longitud,
+    required this.irradiacionData,
+  });
 
   @override
   State<QuestionsScreen> createState() => _QuestionsScreenState();
@@ -19,6 +34,7 @@ class _QuestionsScreenState extends State<QuestionsScreen>
   int? _selectedHorario;
   final TextEditingController _consumoController = TextEditingController();
   final FocusNode _consumoFocus = FocusNode();
+  double _presupuesto = 100000; // valor default del slider
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnim;
@@ -72,27 +88,70 @@ class _QuestionsScreenState extends State<QuestionsScreen>
     if (_currentQuestion == 0) return _selectedMonths.isNotEmpty;
     if (_currentQuestion == 1) return _selectedHorario != null;
     if (_currentQuestion == 2) return _consumoController.text.trim().isNotEmpty;
+    if (_currentQuestion == 3) return true; // slider siempre tiene valor
     return false;
   }
 
   void _onNext() {
-  if (!_canContinue) return;
-  HapticFeedback.mediumImpact();
-  if (_currentQuestion < 2) {
-    _animateToQuestion(_currentQuestion + 1);
-  } else {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ResultsScreen(
-          mesesAltoConsumo: _selectedMonths.toList(),
-          horarioIndex: _selectedHorario ?? 2,
-          consumoAnual: double.tryParse(_consumoController.text) ?? 3600,
-        ),
-      ),
-    );
-  }
-}
+    if (!_canContinue) return;
+    HapticFeedback.mediumImpact();
+    if (_currentQuestion < 3) {
+      _animateToQuestion(_currentQuestion + 1);
+    } else {
+      final horarioIndex = _selectedHorario ?? 2;
 
+      final tiltReal = SolarCalculator.calcularTilt(
+        horarioIndex,
+        widget.irradiacionData.latitud.abs(),
+      );
+      final azimutReal = SolarCalculator.calcularAzimut(horarioIndex);
+
+      final gtiCorregido = widget.irradiacionData.gtiMensual.map((ghi) {
+        final factor = _factorCorreccion(tiltReal, azimutReal, widget.latitud);
+        return ghi * factor;
+      }).toList();
+
+      final promedioCorregido =
+          gtiCorregido.reduce((a, b) => a + b) / gtiCorregido.length;
+
+      final irradiacionCorregida = SolarIrradiationData(
+        ghiMensual: widget.irradiacionData.ghiMensual,
+        gtiMensual: gtiCorregido,
+        promedioDiarioGTI: promedioCorregido,
+        tiltUsado: tiltReal,
+        azimutUsado: azimutReal,
+        latitud: widget.irradiacionData.latitud,
+        longitud: widget.irradiacionData.longitud,
+        fuenteReal: widget.irradiacionData.fuenteReal,
+      );
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ResultsScreen(
+            codigoPostal: widget.codigoPostal,
+            localidad: widget.localidad,
+            latitud: widget.latitud,
+            longitud: widget.longitud,
+            irradiacionData: irradiacionCorregida,
+            mesesAltoConsumo: _selectedMonths.toList(),
+            horarioIndex: horarioIndex,
+            consumoAnual: double.tryParse(_consumoController.text) ?? 3600,
+            presupuesto: _presupuesto,
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Factor de corrección GTI según tilt y azimut del usuario.
+  double _factorCorreccion(double tilt, double azimut, double latitud) {
+    final tiltOptimo = latitud.abs() * 0.87;
+    final difTilt = (tilt - tiltOptimo).abs();
+    final factorTilt = 1.0 - (difTilt / (tiltOptimo + 1)) * 0.15;
+    final difAzimut = (azimut - 180).abs();
+    final factorAzimut = 1.0 - (difAzimut / 180) * 0.20;
+    return (factorTilt * factorAzimut).clamp(0.75, 1.15);
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -142,7 +201,7 @@ class _QuestionsScreenState extends State<QuestionsScreen>
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
-                                  'Paso ${_currentQuestion + 2} de 5',
+                                  'Paso ${_currentQuestion + 2} de 6',
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: AppColors.textHint,
@@ -150,7 +209,7 @@ class _QuestionsScreenState extends State<QuestionsScreen>
                                   ),
                                 ),
                                 Text(
-                                  '${((_currentQuestion + 2) / 5 * 100).toInt()}%',
+                                  '${((_currentQuestion + 2) / 6 * 100).toInt()}%',
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: AppColors.solarOrange,
@@ -163,7 +222,7 @@ class _QuestionsScreenState extends State<QuestionsScreen>
                             ClipRRect(
                               borderRadius: BorderRadius.circular(4),
                               child: LinearProgressIndicator(
-                                value: (_currentQuestion + 2) / 5,
+                                value: (_currentQuestion + 2) / 6,
                                 backgroundColor: AppColors.border,
                                 valueColor:
                                     const AlwaysStoppedAnimation<Color>(
@@ -216,6 +275,8 @@ class _QuestionsScreenState extends State<QuestionsScreen>
         return _buildHorarioQuestion();
       case 2:
         return _buildConsumoQuestion();
+      case 3:
+        return _buildPresupuestoQuestion();
       default:
         return const SizedBox();
     }
@@ -552,6 +613,137 @@ class _QuestionsScreenState extends State<QuestionsScreen>
     );
   }
 
+  // ── PREGUNTA 4: Presupuesto ────────────────────────────────────
+  Widget _buildPresupuestoQuestion() {
+    final min = 20000.0;
+    final max = 500000.0;
+
+    String _formatMXN(double val) {
+      if (val >= 1000000) return '\$${(val / 1000000).toStringAsFixed(1)}M';
+      if (val >= 1000) return '\$${(val / 1000).toStringAsFixed(0)}k';
+      return '\$${val.toStringAsFixed(0)}';
+    }
+
+    // Etiqueta de rango según presupuesto
+    String _rangoLabel() {
+      if (_presupuesto < 50000) return 'Panel individual o batería básica';
+      if (_presupuesto < 100000) return 'Kit solar pequeño (2–4 paneles)';
+      if (_presupuesto < 200000) return 'Kit solar mediano (4–8 paneles)';
+      if (_presupuesto < 350000) return 'Sistema completo con batería';
+      return 'Sistema premium de alta autonomía';
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 28),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 32),
+          _buildQuestionHeader(
+            icon: Icons.account_balance_wallet_rounded,
+            title: '¿Cuál es tu\npresupuesto?',
+            subtitle: 'Desliza para indicar cuánto puedes invertir.',
+          ),
+          const SizedBox(height: 48),
+
+          // Monto actual
+          Center(
+            child: Column(
+              children: [
+                Text(
+                  _formatMXN(_presupuesto),
+                  style: const TextStyle(
+                    fontSize: 52,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.solarOrange,
+                    letterSpacing: -2,
+                  ),
+                ),
+                const Text('MXN',
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textHint,
+                        letterSpacing: 2)),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 32),
+
+          // Slider
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: AppColors.solarOrange,
+              inactiveTrackColor: AppColors.border,
+              thumbColor: AppColors.solarOrange,
+              overlayColor: AppColors.solarOrange.withValues(alpha: 0.15),
+              thumbShape:
+                  const RoundSliderThumbShape(enabledThumbRadius: 14),
+              trackHeight: 6,
+            ),
+            child: Slider(
+              value: _presupuesto,
+              min: min,
+              max: max,
+              divisions: 96,
+              onChanged: (val) {
+                HapticFeedback.selectionClick();
+                setState(() => _presupuesto = val);
+              },
+            ),
+          ),
+
+          // Min / Max labels
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(_formatMXN(min),
+                    style: const TextStyle(
+                        fontSize: 11, color: AppColors.textHint)),
+                Text(_formatMXN(max),
+                    style: const TextStyle(
+                        fontSize: 11, color: AppColors.textHint)),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 32),
+
+          // Descripción del rango
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: AppColors.backgroundCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.lightbulb_rounded,
+                    color: AppColors.solarOrange, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _rangoLabel(),
+                    style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                        height: 1.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 48),
+        ],
+      ),
+    );
+  }
+
   // ── Header reutilizable ────────────────────────────────────────
   Widget _buildQuestionHeader({
     required IconData icon,
@@ -606,7 +798,7 @@ class _QuestionsScreenState extends State<QuestionsScreen>
   // ── Botón siguiente ────────────────────────────────────────────
   Widget _buildNextButton() {
     final enabled = _canContinue;
-    final isLast = _currentQuestion == 2;
+    final isLast = _currentQuestion == 3;
     return GestureDetector(
       onTap: enabled ? _onNext : null,
       child: AnimatedContainer(

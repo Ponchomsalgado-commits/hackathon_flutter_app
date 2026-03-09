@@ -2,21 +2,43 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import '../theme/app_theme.dart';
+import '../services/nasa_power_service.dart';
+import '../logic/solar_calculator.dart';
 import 'comparador_screen.dart';
 
 class ResultsScreen extends StatefulWidget {
   final String codigoPostal;
+  final String localidad;
+  final double latitud;
+  final double longitud;
+  final SolarIrradiationData irradiacionData;
   final List<int> mesesAltoConsumo;
   final int horarioIndex;
   final double consumoAnual;
+  final double presupuesto;
 
   const ResultsScreen({
     super.key,
     this.codigoPostal = '06600',
+    this.localidad = 'Ciudad de México',
+    this.latitud = 19.4326,
+    this.longitud = -99.1332,
+    SolarIrradiationData? irradiacionData,
     this.mesesAltoConsumo = const [5, 6, 7],
     this.horarioIndex = 2,
     this.consumoAnual = 3600,
-  });
+    this.presupuesto = 100000,
+  }) : irradiacionData = irradiacionData ??
+            const SolarIrradiationData(
+              ghiMensual: [4.5, 5.2, 6.0, 6.8, 6.5, 5.8, 5.5, 5.6, 5.2, 5.0, 4.6, 4.2],
+              gtiMensual: [4.5, 5.2, 6.0, 6.8, 6.5, 5.8, 5.5, 5.6, 5.2, 5.0, 4.6, 4.2],
+              promedioDiarioGTI: 5.8,
+              tiltUsado: 25,
+              azimutUsado: 180,
+              latitud: 19.4326,
+              longitud: -99.1332,
+              fuenteReal: false,
+            );
 
   @override
   State<ResultsScreen> createState() => _ResultsScreenState();
@@ -80,55 +102,31 @@ class _ResultsScreenState extends State<ResultsScreen>
   }
 
   void _calcularDatos() {
-    // Radiación solar estimada por código postal (México)
-    final cp = int.tryParse(widget.codigoPostal) ?? 6600;
-    if (cp < 20000) {
-      _radiacionSolar = 5.8; // CDMX / Centro
-      _localidad = 'Ciudad de México';
-    } else if (cp < 45000) {
-      _radiacionSolar = 6.2; // Occidente / Jalisco
-      _localidad = 'Occidente de México';
-    } else if (cp < 65000) {
-      _radiacionSolar = 6.8; // Norte / Monterrey
-      _localidad = 'Norte de México';
-    } else if (cp < 80000) {
-      _radiacionSolar = 7.1; // Noroeste / Sonora
-      _localidad = 'Noroeste de México';
-    } else {
-      _radiacionSolar = 5.5; // Sur / Sureste
-      _localidad = 'Sur de México';
-    }
+    _radiacionSolar = widget.irradiacionData.promedioDiarioGTI;
+    _localidad = widget.localidad;
+    _tilt = widget.irradiacionData.tiltUsado;
+    _azimut = SolarCalculator.calcularAzimut(widget.horarioIndex);
 
-    // Tilt y Azimut según horario de consumo
-    // 0=Madrugada, 1=Mañana, 2=Tarde, 3=Noche
-    switch (widget.horarioIndex) {
-      case 0: // Madrugada — no aplica captación directa
-        _tilt = 20;
-        _azimut = 180; // Sur puro, máxima captación general
-        break;
-      case 1: // Mañana — orientar al Este
-        _tilt = 25;
-        _azimut = 135; // Sur-Este
-        break;
-      case 2: // Tarde — orientar al Oeste
-        _tilt = 28;
-        _azimut = 225; // Sur-Oeste
-        break;
-      case 3: // Noche — maximizar captación diurna
-        _tilt = 22;
-        _azimut = 180; // Sur puro
-        break;
-      default:
-        _tilt = 25;
-        _azimut = 180;
-    }
+    const potenciaPanelKW = 0.4;      // 400W por panel
+    const eficienciaSistema = 0.78;   // pérdidas inversor, temperatura, cables
 
-    // Consumo esperado con paneles solares (reducción estimada)
-    final eficienciaSistema = 0.78;
-    final horasPico = _radiacionSolar;
-    _panelesSugeridos = (widget.consumoAnual / (horasPico * 365 * 0.4 * eficienciaSistema)).ceilToDouble();
-    final generacionAnual = _panelesSugeridos * 0.4 * horasPico * 365 * eficienciaSistema;
-    _consumoEsperado = (widget.consumoAnual - generacionAnual).clamp(0, widget.consumoAnual);
+    // Paneles necesarios para cubrir consumo anual
+    _panelesSugeridos = (widget.consumoAnual /
+            (_radiacionSolar * 365 * potenciaPanelKW * eficienciaSistema))
+        .ceilToDouble();
+
+    // Generación real con esos paneles
+    final generacionAnual = _panelesSugeridos *
+        potenciaPanelKW *
+        _radiacionSolar *
+        365 *
+        eficienciaSistema;
+
+    // Consumo residual (lo que sigue pagando a la CFE)
+    _consumoEsperado =
+        (widget.consumoAnual - generacionAnual).clamp(0, widget.consumoAnual);
+
+    // Ahorro real en kWh
     _ahorroEstimado = widget.consumoAnual - _consumoEsperado;
   }
 
@@ -176,6 +174,8 @@ class _ResultsScreenState extends State<ResultsScreen>
                           _buildMesesChart(),
                           const SizedBox(height: 16),
                           _buildPanelesCard(),
+                          const SizedBox(height: 16),
+                          _buildRecomendacionCard(),
                           const SizedBox(height: 32),
                         ],
                       ),
@@ -324,73 +324,117 @@ class _ResultsScreenState extends State<ResultsScreen>
   }
 
   Widget _buildConsumoCard() {
+    // ── Tarifa CFE ──────────────────────────────────────────────────
+    // TODO: reemplazar con tabla real de tarifas por zona/DAC
+    const tarifaCFE = 2.50; // MXN por kWh (tarifa doméstica promedio)
+
+    final generacionAnual = _panelesSugeridos * 0.4 * _radiacionSolar * 365 * 0.78;
+    final ahorroKWh = _ahorroEstimado.clamp(0, widget.consumoAnual);
+    final ahorroMXN = ahorroKWh * tarifaCFE;
+    final porcentaje = (ahorroKWh / widget.consumoAnual * 100).clamp(0, 100);
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            AppColors.solarOrange.withOpacity(0.15),
-            AppColors.solarOrange.withOpacity(0.05),
+            AppColors.solarOrange.withValues(alpha: 0.15),
+            AppColors.solarOrange.withValues(alpha: 0.05),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.solarOrange.withOpacity(0.3)),
+        border: Border.all(
+            color: AppColors.solarOrange.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.bolt_rounded, color: AppColors.solarOrange, size: 18),
-              const SizedBox(width: 8),
-              const Text('CONSUMO ESPERADO AÑO SIGUIENTE',
-                  style: TextStyle(fontSize: 11, color: AppColors.solarOrange,
-                      fontWeight: FontWeight.w600, letterSpacing: 0.8)),
-            ],
-          ),
+          // Título
+          Row(children: [
+            const Icon(Icons.wb_sunny_rounded,
+                color: AppColors.solarOrange, size: 18),
+            const SizedBox(width: 8),
+            const Text('GENERACIÓN SOLAR ESTIMADA',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.solarOrange,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.8)),
+          ]),
+
           const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              AnimatedBuilder(
-                animation: _countAnim,
-                builder: (context, _) {
-                  final val = (_consumoEsperado * _countAnim.value).toStringAsFixed(0);
-                  return Text(val,
+
+          // Número grande — generación anual
+          AnimatedBuilder(
+            animation: _countAnim,
+            builder: (context, _) {
+              final val = (generacionAnual * _countAnim.value)
+                  .toStringAsFixed(0);
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(val,
                       style: const TextStyle(
-                        fontSize: 52, fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary, letterSpacing: -2,
-                      ));
-                },
-              ),
-              const Padding(
-                padding: EdgeInsets.only(bottom: 10, left: 6),
-                child: Text('kWh/año',
-                    style: TextStyle(fontSize: 16, color: AppColors.textSecondary)),
-              ),
-            ],
+                          fontSize: 52,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                          letterSpacing: -2)),
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 10, left: 6),
+                    child: Text('kWh/año',
+                        style: TextStyle(
+                            fontSize: 16,
+                            color: AppColors.textSecondary)),
+                  ),
+                ],
+              );
+            },
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _buildMiniStat('Consumo actual',
-                  '${widget.consumoAnual.toStringAsFixed(0)} kWh'),
-              const SizedBox(width: 16),
-              _buildMiniStat('Ahorro estimado',
-                  '${_ahorroEstimado.toStringAsFixed(0)} kWh'),
-            ],
-          ),
+
+          const SizedBox(height: 6),
+          Text('Producción estimada con ${_panelesSugeridos.toInt()} paneles de 400W',
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.textHint)),
+
+          const SizedBox(height: 20),
+
+          // 3 stats: kWh · MXN · %
+          Row(children: [
+            _buildMiniStat(
+              icon: Icons.bolt_rounded,
+              label: 'Ahorro kWh/año',
+              value: '${ahorroKWh.toStringAsFixed(0)} kWh',
+            ),
+            const SizedBox(width: 10),
+            _buildMiniStat(
+              icon: Icons.attach_money_rounded,
+              label: 'Ahorro MXN/año',
+              value: '\$${(ahorroMXN / 1000).toStringAsFixed(1)}k',
+              sublabel: 'Tarifa \$${tarifaCFE.toStringAsFixed(2)}/kWh',
+            ),
+            const SizedBox(width: 10),
+            _buildMiniStat(
+              icon: Icons.pie_chart_rounded,
+              label: 'Reducción factura',
+              value: '${porcentaje.toStringAsFixed(0)}%',
+            ),
+          ]),
         ],
       ),
     );
   }
 
-  Widget _buildMiniStat(String label, String value) {
+  Widget _buildMiniStat({
+    required IconData icon,
+    required String label,
+    required String value,
+    String? sublabel,
+  }) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
           color: AppColors.backgroundInput,
           borderRadius: BorderRadius.circular(12),
@@ -398,18 +442,32 @@ class _ResultsScreenState extends State<ResultsScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label,
-                style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
-            const SizedBox(height: 4),
+            Icon(icon, color: AppColors.solarOrange, size: 16),
+            const SizedBox(height: 6),
             Text(value,
                 style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary)),
+            const SizedBox(height: 2),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 10, color: AppColors.textHint, height: 1.3)),
+            if (sublabel != null) ...[
+              const SizedBox(height: 2),
+              Text(sublabel,
+                  style: const TextStyle(
+                      fontSize: 9,
+                      color: AppColors.solarOrange,
+                      height: 1.2)),
+            ],
           ],
         ),
       ),
     );
   }
+  
+  
 
   Widget _buildSolarGrid() {
     return Row(
@@ -604,6 +662,155 @@ class _ResultsScreenState extends State<ResultsScreen>
     );
   }
 
+  Widget _buildRecomendacionCard() {
+    // Porcentaje de cobertura solar
+    final cobertura = (_ahorroEstimado / widget.consumoAnual * 100).clamp(0, 100);
+
+    // Ahorro económico estimado (tarifa CFE promedio $2.50/kWh)
+    final ahorroMXN = _ahorroEstimado * 2.50;
+
+    // ROI estimado
+    final roiAnios = widget.presupuesto > 0
+        ? (widget.presupuesto / ahorroMXN).clamp(0, 30)
+        : 0.0;
+
+    // Horario label
+    final horarioLabels = ['Madrugada', 'Mañana', 'Tarde', 'Noche'];
+    final horarioLabel = horarioLabels[widget.horarioIndex.clamp(0, 3)];
+
+    // Tipo de sistema según presupuesto y paneles
+    String _tipoSistema() {
+      if (_panelesSugeridos <= 3) return 'Sistema básico residencial';
+      if (_panelesSugeridos <= 6) return 'Sistema mediano residencial';
+      if (_panelesSugeridos <= 12) return 'Sistema completo con batería';
+      return 'Sistema industrial / premium';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppColors.solarOrange.withValues(alpha: 0.12),
+            AppColors.solarOrange.withValues(alpha: 0.04),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+            color: AppColors.solarOrange.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.auto_awesome_rounded,
+                color: AppColors.solarOrange, size: 18),
+            const SizedBox(width: 8),
+            const Text('TU PERFIL SOLAR',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.solarOrange,
+                    letterSpacing: 1.2)),
+          ]),
+          const SizedBox(height: 16),
+
+          // Tipo de sistema
+          Text(_tipoSistema(),
+              style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          Text(
+            'Orientado al $horarioLabel · Tilt ${_tilt.toStringAsFixed(0)}° · Azimut ${_azimut.toStringAsFixed(0)}°',
+            style: const TextStyle(fontSize: 12, color: AppColors.textHint),
+          ),
+
+          const SizedBox(height: 20),
+
+          // Stats clave
+          Row(children: [
+            _buildRecoStat(
+              '${cobertura.toStringAsFixed(0)}%',
+              'Cobertura solar',
+              Icons.wb_sunny_rounded,
+            ),
+            const SizedBox(width: 12),
+            _buildRecoStat(
+              '\$${(ahorroMXN / 1000).toStringAsFixed(1)}k',
+              'Ahorro/año MXN',
+              Icons.savings_rounded,
+            ),
+            const SizedBox(width: 12),
+            _buildRecoStat(
+              '${roiAnios.toStringAsFixed(1)} años',
+              'Retorno inversión',
+              Icons.trending_up_rounded,
+            ),
+          ]),
+
+          const SizedBox(height: 16),
+
+          // Mensaje personalizado
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.backgroundCard,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(children: [
+              const Icon(Icons.lightbulb_rounded,
+                  color: AppColors.solarOrange, size: 16),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  cobertura >= 80
+                      ? 'Excelente potencial. Con ${_panelesSugeridos.toInt()} paneles cubres el ${cobertura.toStringAsFixed(0)}% de tu consumo.'
+                      : cobertura >= 50
+                          ? 'Buen potencial. Puedes reducir tu factura a la mitad con ${_panelesSugeridos.toInt()} paneles.'
+                          : 'Con ${_panelesSugeridos.toInt()} paneles reduces significativamente tu dependencia de la CFE.',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      height: 1.5),
+                ),
+              ),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecoStat(String value, String label, IconData icon) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: AppColors.backgroundCard,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(children: [
+          Icon(icon, color: AppColors.solarOrange, size: 18),
+          const SizedBox(height: 6),
+          Text(value,
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 2),
+          Text(label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  fontSize: 10, color: AppColors.textHint, height: 1.3)),
+        ]),
+      ),
+    );
+  }
+
   Widget _buildComparadorButton() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
@@ -616,6 +823,9 @@ class _ResultsScreenState extends State<ResultsScreen>
                 panelesSugeridos: _panelesSugeridos.toInt(),
                 consumoAnual: widget.consumoAnual,
                 localidad: _localidad,
+                irradiacion: _radiacionSolar,
+                horarioIndex: widget.horarioIndex,
+                presupuesto: widget.presupuesto,
               ),
             ),
           );
