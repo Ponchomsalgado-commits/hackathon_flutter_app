@@ -25,7 +25,7 @@ abstract class SolarDataSource {
 
 class ProviderADataSource implements SolarDataSource {
   @override
-  String get proveedorId => 'proveedor_alpha';
+  String get proveedorId => 'proveedor_a';
 
   @override
   String get nombre => 'SunPower México';
@@ -75,7 +75,7 @@ class ProviderADataSource implements SolarDataSource {
 
 class ProviderBDataSource implements SolarDataSource {
   @override
-  String get proveedorId => 'proveedor_bravo';
+  String get proveedorId => 'proveedor_a';
 
   @override
   String get nombre => 'Enercity Solar';
