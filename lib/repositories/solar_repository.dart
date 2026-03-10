@@ -97,17 +97,17 @@ class SolarRepository {
   /// Mapper para Proveedor A (SunPower México)
   Product _mapProviderA(Map<String, dynamic> raw) {
     return Product(
-      id: raw['product_id'] as String,
+      id: raw['product_id'] as String? ?? '',
       proveedorId: 'proveedor_a',
-      categoria: _parseCategoryA(raw['type'] as String),
-      nombre: raw['title'] as String,
+      categoria: _parseCategoryA(raw['type'] as String? ?? 'panel'),
+      nombre: raw['title'] as String? ?? 'Sin nombre',
       descripcion: raw['description'] as String? ?? '',
-      precio: (raw['cost'] as num).toDouble(),
+      precio: (raw['cost'] as num?)?.toDouble() ?? 0,
       potenciaKW: (raw['power_kw'] as num?)?.toDouble(),
       capacidadKWh: (raw['battery_kwh'] as num?)?.toDouble(),
       cantidadPaneles: raw['num_panels'] as int?,
-      ahorroAnualEstimado: (raw['yearly_savings'] as num).toDouble(),
-      garantiaAnios: raw['warranty_years'] as int,
+      ahorroAnualEstimado: (raw['yearly_savings'] as num?)?.toDouble() ?? 0,
+      garantiaAnios: raw['warranty_years'] as int? ?? 0,
       etiqueta: raw['badge'] as String?,
     );
   }
@@ -128,7 +128,6 @@ class SolarRepository {
     final potenciaKW = wattPeak != null ? wattPeak / 1000.0 : null;
     final storagekwh = raw['storage_kwh'] as num?;
 
-    // Detectar categoría por los campos disponibles
     ProductCategory categoria;
     if (storagekwh != null && potenciaKW == null) {
       categoria = ProductCategory.bateria;
@@ -139,17 +138,17 @@ class SolarRepository {
     }
 
     return Product(
-      id: raw['item_id'] as String,
+      id: raw['item_id'] as String? ?? '',
       proveedorId: 'proveedor_b',
       categoria: categoria,
-      nombre: raw['item_name'] as String,
+      nombre: raw['item_name'] as String? ?? 'Sin nombre',
       descripcion: raw['item_desc'] as String? ?? '',
-      precio: (raw['price_mxn'] as num).toDouble(),
+      precio: (raw['price_mxn'] as num?)?.toDouble() ?? 0,
       potenciaKW: potenciaKW,
       capacidadKWh: storagekwh?.toDouble(),
       cantidadPaneles: raw['panel_count'] as int?,
-      ahorroAnualEstimado: (raw['annual_save'] as num).toDouble(),
-      garantiaAnios: raw['guarantee'] as int,
+      ahorroAnualEstimado: (raw['annual_save'] as num?)?.toDouble() ?? 0,
+      garantiaAnios: raw['guarantee'] as int? ?? 0,
       etiqueta: raw['label'] as String?,
     );
   }
@@ -157,8 +156,8 @@ class SolarRepository {
   /// Mapper para Proveedor C (Solaris Pro)
   /// Nota: este proveedor anida las specs bajo una clave 'specs' y 'roi'.
   Product _mapProviderC(Map<String, dynamic> raw) {
-    final specs = raw['specs'] as Map<String, dynamic>;
-    final roi = raw['roi'] as Map<String, dynamic>;
+    final specs = raw['specs'] as Map<String, dynamic>? ?? {};
+    final roi = raw['roi'] as Map<String, dynamic>? ?? {};
     final storagekwh = specs['kwh_storage'] as num?;
     final potenciaKW = (specs['kw'] as num?)?.toDouble();
 
@@ -172,17 +171,17 @@ class SolarRepository {
     }
 
     return Product(
-      id: raw['uid'] as String,
+      id: raw['uid'] as String? ?? '',
       proveedorId: 'proveedor_c',
       categoria: categoria,
-      nombre: raw['name'] as String,
+      nombre: raw['name'] as String? ?? 'Sin nombre',
       descripcion: raw['summary'] as String? ?? '',
-      precio: (raw['mxn_price'] as num).toDouble(),
+      precio: (raw['mxn_price'] as num?)?.toDouble() ?? 0,
       potenciaKW: potenciaKW,
       capacidadKWh: storagekwh?.toDouble(),
       cantidadPaneles: specs['panels'] as int?,
-      ahorroAnualEstimado: (roi['yearly_kwh_saved'] as num).toDouble(),
-      garantiaAnios: roi['warranty'] as int,
+      ahorroAnualEstimado: (roi['yearly_kwh_saved'] as num?)?.toDouble() ?? 0,
+      garantiaAnios: roi['warranty'] as int? ?? 0,
       etiqueta: raw['tag'] as String?,
     );
   }

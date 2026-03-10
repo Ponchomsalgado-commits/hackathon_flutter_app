@@ -615,7 +615,7 @@ class _QuestionsScreenState extends State<QuestionsScreen>
 
   // ── PREGUNTA 4: Presupuesto ────────────────────────────────────
   Widget _buildPresupuestoQuestion() {
-    final min = 20000.0;
+    final min = 5000.0;
     final max = 500000.0;
 
     String _formatMXN(double val) {

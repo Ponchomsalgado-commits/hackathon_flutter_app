@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../models/product_model.dart';
 import '../repositories/solar_repository.dart';
 import '../logic/solar_calculator.dart';
+import '../logic/recommendation_engine.dart';
 
 class ComparadorScreen extends StatefulWidget {
   final int panelesSugeridos;
@@ -68,8 +69,18 @@ class _ComparadorScreenState extends State<ComparadorScreen>
     setState(() { _isLoading = true; _errorMessage = null; });
     try {
       final all = await _repository.getAllProducts();
-      final recomendados = _calculator.recomendar(all);
-      setState(() { _productos = recomendados; _isLoading = false; });
+
+      // Motor de recomendación con perfil real del usuario
+      final engine = RecommendationEngine(
+        consumoAnual: widget.consumoAnual,
+        irradiacion: widget.irradiacion,
+        presupuesto: widget.presupuesto,
+      );
+
+      final scored = engine.rank(all);
+      final rankeados = scored.map((s) => s.producto).toList();
+
+      setState(() { _productos = rankeados; _isLoading = false; });
       _applyFilter();
       _fadeController.forward();
     } catch (e) {
